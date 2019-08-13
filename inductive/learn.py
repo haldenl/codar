@@ -17,9 +17,9 @@ META_VAR = {
     "@position_channel": ["x", "y"],
     "@mark_prop_channel": ["color", "size", "shape"],
     "@facet_channel": ["row", "column"],
-    "@encoding": ["e1", "e2", "e3", "e4"],
     "@aggr": ["median", "sum", "max", "min", "avg"],
 }
+
 
 class Atom(object):
     def __init__(self, relation, terms):
@@ -29,6 +29,16 @@ class Atom(object):
     def __repr__(self):
         return f"{self.rel}({','.join([t for t in self.terms])})"
 
+    def __eq__(self, other):
+        if isinstance(other, Atom):
+            if other.__repr__() == self.__repr__():
+                return True
+        return False
+
+    def __hash__(self):
+        return self.__repr__.__hash__()
+
+
 class Rule(object):
     def __init__(self, head, body):
         self.head = head
@@ -37,11 +47,22 @@ class Rule(object):
     def __repr__(self):
         return f"{self.head} :- {','.format([at for at in self.body])}"
 
+    def __eq__(self, other):
+        if isinstance(other, Rule):
+            if other.__repr__() == self.__repr__():
+                return True
+        return False
+
+    def __hash__(self):
+        return self.__repr__.__hash__()
+
+
 def intersect(l_lists):
     res = l_lists[0]
     for l in l_lists:
         res = [x for x in res if x in l]
     return res
+
 
 def analyze():
     all_rels = {}
@@ -83,7 +104,7 @@ def infer_facts(vl_spec, data_schema):
 
     return facts
 
-def infer_rules(facts, max_size=3):
+def infer_rules(facts, max_size=5):
     """Given properties of a spec, infer relations over the spec"""
     rules = []
 
@@ -93,12 +114,23 @@ def infer_rules(facts, max_size=3):
         if size == 1:
             return [[f] for f in facts]
         bases = enumerate_rules(size - 1)
+        body_candidates = []
         for base in bases:
+            used_terms = list(set([t for f in base for t in f.terms]))
             for f in facts:
-                all_literals = []
+                if f in base: 
+                    continue
+                if f.rel in ["enc_type", "field_type", "aggregate", "bin"] and f.terms[0] not in used_terms: 
+                    continue
+                body_candidates.append(base + [f])
+        return body_candidates
 
+    body_candidates = enumerate_rules(max_size)
 
+    body_candidates = [r for r in body_candidates if r[-1].rel != "channel"]
 
+    pprint(body_candidates)
+    sys.exit(-1)
 
             
     for size in range(2, max_size + 1):
@@ -128,7 +160,7 @@ def main():
 
     for d in synth_data + synth_data:
         facts = infer_facts(d["vl"], d["data_schema"]) 
-        #rels = infer_rules(facts)
+        rels = infer_rules(facts)
         pprint(facts)
         #pprint(rels)
 
