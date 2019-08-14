@@ -38,7 +38,6 @@ class Atom(object):
     def __hash__(self):
         return self.__repr__.__hash__()
 
-
 class Rule(object):
     def __init__(self, head, body):
         self.head = head
@@ -56,13 +55,11 @@ class Rule(object):
     def __hash__(self):
         return self.__repr__.__hash__()
 
-
 def intersect(l_lists):
     res = l_lists[0]
     for l in l_lists:
         res = [x for x in res if x in l]
     return res
-
 
 def analyze():
     all_rels = {}
@@ -104,6 +101,12 @@ def infer_facts(vl_spec, data_schema):
 
     return facts
 
+
+def gen_alpha_equivalent_rbody(rbody):
+    # given a rule body, generate all other possible equivalent rule bodies
+    pass
+
+
 def infer_rules(facts, max_size=5):
     """Given properties of a spec, infer relations over the spec"""
     rules = []
@@ -120,16 +123,48 @@ def infer_rules(facts, max_size=5):
             for f in facts:
                 if f in base: 
                     continue
+                # remove the rule if the channel is not yet mentioned
                 if f.rel in ["enc_type", "field_type", "aggregate", "bin"] and f.terms[0] not in used_terms: 
                     continue
                 body_candidates.append(base + [f])
         return body_candidates
 
-    body_candidates = enumerate_rules(max_size)
+    def canonicalize(rbody):
+        return sorted(rbody, key=lambda at: (at.terms[0], at.rel))
 
-    body_candidates = [r for r in body_candidates if r[-1].rel != "channel"]
+    def filter_invalid(rbody):
+        channels = [f.terms[0] for f in rbody if f.rel in ["enc_type", "field_type", "aggregate", "bin", "channel"]]
+        for c in channels:
+            if channels.count(c) == 1:
+                return False
+        return True
 
-    pprint(body_candidates)
+    def lift_rule_body(rbody):
+        terms = list(set([t for fact in rbody for t in fact.terms]))
+        mp, inv_map = {}, {}
+        for t in terms:
+            for var in META_VAR:
+                if t in META_VAR[var]:
+                    if var not in mp:
+                        mp[var] = []
+                    mp[var].append(t)
+                    inv_map[t] = f"{var}_{mp[var].index(t)}"
+        abs_rbody = [Atom(fact.rel, [inv_map[t] if t in inv_map else t for t in fact.terms]) for fact in rbody]
+        return abs_rbody
+
+    body_candidates = [x for l in [enumerate_rules(max_size) for max_size in range(1, max_size + 1) ]for x in l]
+    body_candidates = [canonicalize(rb) for rb in body_candidates if filter_invalid(rb)]
+
+    # infer abstract rule bodies
+    abs_rule_bodies = {}
+    for rbody in body_candidates:
+        print(rbody)
+        print(lift_rule_body(rbody))
+
+
+    #pprint(body_candidates)
+    #print(len(body_candidates))
+
     sys.exit(-1)
 
             
