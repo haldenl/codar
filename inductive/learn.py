@@ -14,10 +14,10 @@ FACTS_HEAD = {
 }
 
 META_VAR = {
-    "@position_channel": ["x", "y"],
-    "@mark_prop_channel": ["color", "size", "shape"],
-    "@facet_channel": ["row", "column"],
-    "@aggr": ["median", "sum", "max", "min", "avg"],
+    "@PC": ["x", "y"], #position_channel
+    "@MC": ["color", "size", "shape"], #mark_prop_channel
+    "@FC": ["row", "column"], #facet_channel
+    "@AG": ["median", "sum", "max", "min", "avg"], #aggr
 }
 
 
@@ -36,7 +36,7 @@ class Atom(object):
         return False
 
     def __hash__(self):
-        return self.__repr__.__hash__()
+        return self.__repr__().__hash__()
 
 class Rule(object):
     def __init__(self, head, body):
@@ -103,7 +103,7 @@ def infer_facts(vl_spec, data_schema):
 
 def canonicalize(rbody):
     # canonicalize a rule body
-    return sorted(rbody, key=lambda at: (at.terms[0], at.rel))
+    return tuple(sorted(rbody, key=lambda at: (at.terms[0], at.rel)))
 
 def filter_invalid(rbody):
     # filter invalid rule bodies
@@ -124,28 +124,58 @@ def lift_rule_body(rbody):
                     mp[var] = []
                 mp[var].append(t)
                 inv_map[t] = f"{var}_{mp[var].index(t)}"
-    abs_rbody = [Atom(fact.rel, [inv_map[t] if t in inv_map else t for t in fact.terms]) for fact in rbody]
+    abs_rbody = tuple([Atom(fact.rel, [inv_map[t] if t in inv_map else t for t in fact.terms]) for fact in rbody])
     return abs_rbody
 
 def gen_alpha_equivalent_rbody(rbody):
     # given a rule body, generate all other possible equivalent rule bodies
-    terms = list(set([t for fact in rbody for t in fact.terms]))
-    return rbody
+
+    meta_terms = list(set([t for fact in rbody for t in fact.terms if t.startswith("@")]))
+    mp = {}
+    for meta_var in META_VAR:
+        for t in meta_terms:
+            if t.startswith(meta_var):
+                if meta_var not in mp:
+                    mp[meta_var] = []
+                mp[meta_var].append(t)
+    
+    # performing alpha-renamings
+    alternative_maps = [{}]
+    for meta_var in mp:
+        srcs = mp[meta_var]
+        updated_alternative_maps = []
+        for dsts in itertools.permutations(srcs):
+            for alter_map in alternative_maps:
+                new_mp = copy.deepcopy(alter_map)
+                for i in range(len(srcs)):
+                    new_mp[srcs[i]] = dsts[i]
+                updated_alternative_maps.append(new_mp)
+        alternative_maps = updated_alternative_maps
+
+    if len(alternative_maps) <= 1:
+        return [rbody]
+
+    all_equivs = []
+    for alter_map in alternative_maps:
+        new_rbody = tuple([Atom(fact.rel, [alter_map[t] if t in alter_map else t for t in fact.terms]) for fact in rbody])
+        all_equivs.append(new_rbody)
+
+    return all_equivs
 
 def enumerate_rules(facts, size):
     if size == 1:
-        return [[f] for f in facts]
+        return [(f,) for f in facts]
     bases = enumerate_rules(facts, size - 1)
     rule_bodies = []
     for base in bases:
-        used_terms = list(set([t for f in base for t in f.terms]))
+        used_terms = set([t for f in base for t in f.terms])
         for f in facts:
             if f in base: 
                 continue
             # remove the rule if the channel is not yet mentioned
             if f.rel in ["enc_type", "field_type", "aggregate", "bin"] and f.terms[0] not in used_terms: 
                 continue
-            rule_bodies.append(base + [f])
+            rule_bodies.append(base + (f,))
     return rule_bodies
 
 def infer_rules(facts, max_size=5):
@@ -155,19 +185,27 @@ def infer_rules(facts, max_size=5):
     head = Atom("invalid", ["v"])
 
     rule_bodies = [x for l in [enumerate_rules(facts, max_size) for max_size in range(1, max_size + 1) ]for x in l]
-    rule_bodies = [canonicalize(rb) for rb in rule_bodies if filter_invalid(rb)]
+    rule_bodies = set([canonicalize(rb) for rb in rule_bodies if filter_invalid(rb)])
 
     # infer abstract rule bodies
     abs_rule_bodies = {}
     for rbody in rule_bodies:
-        print(rbody)
-        print(lift_rule_body(rbody))
+        abs_rule_body = lift_rule_body(rbody)
+        equiv_rbodies = gen_alpha_equivalent_rbody(abs_rule_body)
 
-    #pprint(rule_bodies)
-    #print(len(rule_bodies))
+        abs_exists = False
+        for rb in equiv_rbodies:
+            if rb in abs_rule_bodies:
+                abs_rule_bodies[rb].append(rbody)
+                abs_exists = True
+                break
+
+        if not abs_exists:
+            abs_rule_bodies[abs_rule_body] = [rbody]
+
+    pprint(abs_rule_bodies)
 
     sys.exit(-1)
-
             
     for size in range(2, max_size + 1):
         for lst in itertools.combinations(facts, size):
