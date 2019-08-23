@@ -38,15 +38,15 @@ def load_codar_dataset():
 
     # all data share 
     data_schema = {
-        "Name": "string",
-        "Miles_per_Gallon": "interger",
-        "Cylinders": "interger",
-        "Displacement": "interger",
-        "Horsepower": "interger",
-        "Weight_in_lbs": "interger",
-        "Acceleration": "interger",
-        "Year": "datetime",
-        "Origin": "string"
+        "name": "string",
+        "miles_per_Gallon": "interger",
+        "cylinders": "interger",
+        "displacement": "interger",
+        "horsepower": "interger",
+        "weight_in_lbs": "interger",
+        "acceleration": "interger",
+        "year": "datetime",
+        "origin": "string"
     }
 
     with open("../charts.json", "r") as f:

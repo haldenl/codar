@@ -8,16 +8,18 @@ from vega import VegaLite
 
 import data_utils
 
-FACTS_HEAD = {
+RELATION_TYPE = {
     "view_facts": ["mark"],
     "enc_facts": ["field_ty", "enc_ty", "channel", "aggr", "bin"]
 }
 
 META_VAR = {
-    "@PC": ["x", "y"], #position_channel
-    "@MC": ["color", "size", "shape"], #mark_prop_channel
-    "@FC": ["row", "column"], #facet_channel
-    "@AG": ["median", "sum", "max", "min", "avg"], #aggr
+    "@CH":  ["bar", "text", "line", "point", "x", "y", "color", "size", "shape", "text", "row", "column", "detail"],
+    # "@MK": ["bar", "text", "line", "point"],
+    # "@PC": ["x", "y"], #position_channel
+    # "@MC": ["color", "size", "shape", "text"], #mark_prop_channel
+    # "@FC": ["row", "column"], #facet_channel
+    "@AG": ["median", "sum", "max", "min", "avg", "count"], #aggr
 }
 
 
@@ -44,7 +46,7 @@ class Rule(object):
         self.body = body
 
     def __repr__(self):
-        return f"{self.head} :- {','.format([at for at in self.body])}"
+        return f"{self.head} :- {','.join([str(at) for at in self.body])}"
 
     def __eq__(self, other):
         if isinstance(other, Rule):
@@ -54,6 +56,7 @@ class Rule(object):
 
     def __hash__(self):
         return self.__repr__.__hash__()
+
 
 def intersect(l_lists):
     res = l_lists[0]
@@ -101,17 +104,10 @@ def infer_facts(vl_spec, data_schema):
 
     return facts
 
+
 def canonicalize(rbody):
     # canonicalize a rule body
     return tuple(sorted(rbody, key=lambda at: (at.terms[0], at.rel)))
-
-def filter_invalid(rbody):
-    # filter invalid rule bodies
-    channels = [f.terms[0] for f in rbody if f.rel in ["enc_type", "field_type", "aggregate", "bin", "channel"]]
-    for c in channels:
-        if channels.count(c) == 1:
-            return False
-    return True
 
 def lift_rule_body(rbody):
     # abstract a rule body with meta variables
@@ -124,7 +120,8 @@ def lift_rule_body(rbody):
                     mp[var] = []
                 mp[var].append(t)
                 inv_map[t] = f"{var}_{mp[var].index(t)}"
-    abs_rbody = tuple([Atom(fact.rel, [inv_map[t] if t in inv_map else t for t in fact.terms]) for fact in rbody])
+    abs_rbody = tuple([Atom(fact.rel, [inv_map[t] if t in inv_map else t for t in fact.terms]) if fact.rel != "mark" else fact for fact in rbody])
+    abs_rbody = canonicalize(abs_rbody)
     return abs_rbody
 
 def gen_alpha_equivalent_rbody(rbody):
@@ -162,30 +159,47 @@ def gen_alpha_equivalent_rbody(rbody):
 
     return all_equivs
 
+
 def enumerate_rules(facts, size):
-    if size == 1:
-        return [(f,) for f in facts]
-    bases = enumerate_rules(facts, size - 1)
-    rule_bodies = []
-    for base in bases:
-        used_terms = set([t for f in base for t in f.terms])
-        for f in facts:
-            if f in base: 
-                continue
-            # remove the rule if the channel is not yet mentioned
-            if f.rel in ["enc_type", "field_type", "aggregate", "bin"] and f.terms[0] not in used_terms: 
-                continue
-            rule_bodies.append(base + (f,))
+    """Enumerate rules from known facts """
+
+    def enumerate_rule_body(facts, size):
+        if size == 1:
+            return [(f,) for f in facts]
+        bases = enumerate_rule_body(facts, size - 1)
+        rule_bodies = []
+        for base in bases:
+            used_terms = set([t for f in base for t in f.terms])
+            for f in facts:
+                if f in base: 
+                    continue
+                # remove the rule if the channel is not yet mentioned
+                if f.rel in ["enc_type", "field_type", "aggregate", "bin"] and f.terms[0] not in used_terms: 
+                    continue
+                rule_bodies.append(base + (f,))
+        return rule_bodies
+
+    def filter_invalid(rbody):
+        # filter invalid rule bodies
+        channels = [f.terms[0] for f in rbody if f.rel in ["enc_type", "field_type", "aggregate", "bin", "channel"]]
+        for c in channels:
+            if channels.count(c) == 1:
+                return False
+        return True
+
+    rule_bodies = [x for l in [enumerate_rule_body(facts, size) for size in range(1, size + 1) ]for x in l]
+    rule_bodies = set([canonicalize(rb) for rb in rule_bodies if filter_invalid(rb)])
+
     return rule_bodies
 
-def infer_rules(facts, max_size=5):
+
+def infer_rule_tree(facts, max_size=3):
     """Given properties of a spec, infer relations over the spec"""
     rules = []
 
     head = Atom("invalid", ["v"])
 
-    rule_bodies = [x for l in [enumerate_rules(facts, max_size) for max_size in range(1, max_size + 1) ]for x in l]
-    rule_bodies = set([canonicalize(rb) for rb in rule_bodies if filter_invalid(rb)])
+    rule_bodies = enumerate_rules(facts, max_size)
 
     # infer abstract rule bodies
     abs_rule_bodies = {}
@@ -203,40 +217,67 @@ def infer_rules(facts, max_size=5):
         if not abs_exists:
             abs_rule_bodies[abs_rule_body] = [rbody]
 
-    pprint(abs_rule_bodies)
+    return abs_rule_bodies
 
-    sys.exit(-1)
-            
-    for size in range(2, max_size + 1):
-        for lst in itertools.combinations(facts, size):
-            view_facts, enc_facts = [], []
-            for fact in lst:
-                hd, args = parse_fact(fact)
-                if hd in FACTS_HEAD["view_facts"]:
-                    view_facts.append(fact)
-                if hd in FACTS_HEAD["enc_facts"]:
-                    enc_facts.append(fact)
 
-            if len(enc_facts) > 0:
-                common_literals = intersect([parse_fact(fact)[1] for fact in enc_facts])
-                if len(common_literals) <= 1:
-                    continue
-
-            rules.append(f"invalid(v) :- {','.join([s for s in lst])}")
-    return rules
-    
 def eliminate_pos(rels, pos_rels):
     return [x for x in rels if x not in pos_rels]
+
+
+def union_rule_tree(tr1, tr2):
+    tr = tr1 #copy.deepcopy(tr1)
+    for rule in tr2:
+        rule_in_tr = False
+        for alpha_equiv_rule in gen_alpha_equivalent_rbody(rule):
+            if alpha_equiv_rule in tr:
+                tr[alpha_equiv_rule] = tr[alpha_equiv_rule] + tr2[rule]
+                rule_in_tr = True
+                break
+        if not rule_in_tr:
+            tr[rule] = tr2[rule]
+    return tr
+
+def substract_rule_tree(tr1, tr2):
+    tr = tr1
+    kept_concrete_rules = []
+    for rule in tr2:
+        for alpha_equiv_rule in gen_alpha_equivalent_rbody(rule):
+            if alpha_equiv_rule in tr:
+                remaining_concrete_rules = []
+                concrete_rules = tr.pop(alpha_equiv_rule)
+                for r in concrete_rules:
+                    if r not in tr2[rule]:
+                        remaining_concrete_rules.append(r)
+                kept_concrete_rules = kept_concrete_rules + remaining_concrete_rules
+
+    # for r in kept_concrete_rules:
+    #     tr[r] = [r]
+    return tr
 
 def main():
     synth_data = data_utils.load_synthetic_dataset()
     codar_data = data_utils.load_codar_dataset()
 
-    for d in synth_data + synth_data:
+    rtree = {}
+    for i, d in enumerate(sorted(synth_data + codar_data, key=lambda x: x["label"])):
+        print(f'{i}: {d["label"]}')
         facts = infer_facts(d["vl"], d["data_schema"]) 
-        rels = infer_rules(facts)
-        pprint(facts)
-        #pprint(rels)
+        tr = infer_rule_tree(facts)
+        if d["label"] == False:
+            rtree = union_rule_tree(rtree, tr)
+        elif d["label"] == True:
+            rtree = substract_rule_tree(rtree, tr)
+    
+    for rbody in rtree:
+        print(Rule(Atom("invalid", ["v"]), rbody))
+
+        # print(d)
+        # facts = infer_facts(d["vl"], d["data_schema"]) 
+        # rule_bodies = infer_rule_tree(facts)
+
+        # pprint(facts)
+        # pprint(rule_bodies)
+        # sys.exit(-1)
 
     #pprint(loaded_data)
 
