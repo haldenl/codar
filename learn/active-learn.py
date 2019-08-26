@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description="codar active learning cli")
 
 # data and label files
 parser.add_argument('--data_file', type=str, default="pairs.json", help="the dataset pool")
-parser.add_argument('--labels', type=str, default=dict(), help="labels of the dataset: >, <, bad, unlabeled")
+parser.add_argument('--labels', type=str, default="{}", help="labels of the dataset: >, <, bad, unlabeled")
 
 # active learning parameters
 parser.add_argument('--min_label_size', type=int, default=15, help="the minimum number of labels we need to start active learning")
@@ -56,7 +56,7 @@ if __name__ == '__main__':
     with open(data_file, "r") as f:
         dataset = json.load(f)
 
-    labels = args.labels
+    labels = json.loads(args.labels)
     #labels = { e["pair_id"] : e["label"] for e in raw_labels }
 
     sample_func = args.sample_func
