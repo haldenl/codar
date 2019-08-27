@@ -47,6 +47,27 @@ def get_pair_feature(pair):
         combined[k] -= v
     return combined
 
+def active_learn_one_iter(model, X_label, y_label, X_pool, sample_func):
+    """one iteration of active learning """
+    model.fit(X_label, y_label)
+    
+    # different sample function to obtain new data
+    if sample_func == "entropy":
+        # entropy based sampling
+        prob_vals = model.predict_proba(X_pool)
+        entropy_uncertainty = (-prob_vals * np.log2(prob_vals)).sum(axis=1)
+        selections = (np.argsort(entropy_uncertainty)[::-1])[:sample_size]
+    elif sample_func == "margin":
+        # entropy based sampling
+        prob_vals = model.predict_proba(X_pool)
+        rev = np.sort(prob_vals, axis=1)[:, ::-1]
+        values = rev[:, 0] - rev[:, 1]
+        selections = np.argsort(values)[:sample_size]
+    elif sample_func == "random":
+        selections = np.random.choice(list(range(len(X_pool))), sample_size)
+
+    return selections
+
     
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -91,22 +112,7 @@ if __name__ == '__main__':
         X_pool = np.array([[(p["feature"][feature_name] if feature_name in p else 0) for feature_name in all_features_names] for p in pool_data])
 
         model = CalibratedClassifierCV(LinearSVC(fit_intercept=0), cv=5)
-        model.fit(X_label, y_label)
-        
-        # different sample function to obtain new data
-        if sample_func == "entropy":
-            # entropy based sampling
-            prob_vals = model.predict_proba(X_pool)
-            entropy_uncertainty = (-prob_vals * np.log2(prob_vals)).sum(axis=1)
-            selections = (np.argsort(entropy_uncertainty)[::-1])[:sample_size]
-        elif sample_func == "margin":
-            # entropy based sampling
-            prob_vals = model.predict_proba(X_pool)
-            rev = np.sort(prob_vals, axis=1)[:, ::-1]
-            values = rev[:, 0] - rev[:, 1]
-            selections = np.argsort(values)[:sample_size]
-        elif sample_func == "random":
-            selections = np.random.choice(list(range(len(X_pool))), sample_size)
+        selections = active_learn_one_iter(model, X_label, y_label, X_pool, sample_func)
 
         to_label_ids = [pool_data[k]["pair_id"] for k in selections]
 
